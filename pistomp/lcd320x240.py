@@ -692,6 +692,8 @@ class Lcd(abstract_lcd.Lcd):
         if self.w_splash is not None:
             self.w_splash.set_foreground(self.color_splash_down)
             self.splash_panel.refresh()
+        if hasattr(self.pstack.lcd, "cleanup"):
+            self.pstack.lcd.cleanup()
 
     def clear(self):
         pass

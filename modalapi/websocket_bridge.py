@@ -101,7 +101,23 @@ class WebSocketWorker:
                     if flushed:
                         logging.info(f"Flushed {flushed} stale messages from queue after reconnect")
 
-                    await asyncio.gather(self._process_queue(ws), self._receive_messages(ws))
+                    task1 = asyncio.create_task(self._process_queue(ws))
+                    task2 = asyncio.create_task(self._receive_messages(ws))
+                    try:
+                        done, pending = await asyncio.wait(
+                            [task1, task2],
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
+                        for task in done:
+                            task.result()  # propagate exceptions
+                    finally:
+                        for task in [task1, task2]:
+                            if not task.done():
+                                task.cancel()
+                                try:
+                                    await task
+                                except asyncio.CancelledError:
+                                    pass
 
             except (websockets.exceptions.WebSocketException, OSError, ConnectionRefusedError) as e:
                 logging.error(f"WebSocket connection error: {e}")
@@ -123,8 +139,10 @@ class WebSocketWorker:
                 try:
                     msg = self.command_queue.get_nowait()
                 except queue.Empty:
-                    await asyncio.sleep(0.001)  # 1ms yield
-                    continue
+                    try:
+                        msg = await asyncio.to_thread(self.command_queue.get, timeout=0.5)
+                    except queue.Empty:
+                        continue
 
                 await ws.send(msg)
                 self.messages_sent += 1

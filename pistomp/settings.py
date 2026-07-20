@@ -41,6 +41,8 @@ class Settings:
         try:
             with open(self.file, 'r') as ymlfile:
                 self.data = yaml.load(ymlfile, Loader=yaml.SafeLoader)
+                if self.data is None:
+                    self.data = {}
         except:
             # File can't be opened so let's create an empty dict then calls to set_setting() will save/create the file
             self.data = {}
@@ -54,10 +56,16 @@ class Settings:
 
     def set_setting(self, name, value):
         self.data[name] = value
-        # Each set results in a file dump
-        with open(self.file, 'w') as ymlfile:
-            yaml.dump(self.data, ymlfile)
+        # Atomic write: write to temp file then rename to target path
+        temp_file = self.file + ".tmp"
         try:
-            shutil.chown(self.file, user=USER, group=USER)
-        except LookupError:
-            pass
+            with open(temp_file, 'w') as ymlfile:
+                yaml.dump(self.data, ymlfile)
+            os.replace(temp_file, self.file)
+            try:
+                shutil.chown(self.file, user=USER, group=USER)
+            except LookupError:
+                pass
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to write settings file {self.file}: {e}")

@@ -231,7 +231,7 @@ class Lcd(abstract_lcd.Lcd):
         y = 2
         menu_list = list(sorted(menu_items))
         for i in menu_list:
-            if idx is 0:
+            if idx == 0:
                 self.menu_draw.text((x, y), "%s" % menu_items[i][Token.NAME], True, self.small_font)
                 x = 8   # indent after first element (back button)
             else:

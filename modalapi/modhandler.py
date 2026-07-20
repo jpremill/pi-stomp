@@ -213,64 +213,84 @@ class Modhandler(Handler):
                 self.lcd.wifi_menu.notify_status_change()
 
     def poll_system_info(self):
-        # Get the system state from the systemd service
-        try:
-            output = subprocess.check_output(['systemctl', 'show', '-p', 'SystemState'])
-            if output:
-                # Parse the output to extract the SystemState value
-                # Output format is typically: SystemState=running
-                system_state_line = output.decode().strip()
-                if '=' in system_state_line:
-                    self.SystemState = system_state_line.split('=', 1)[1]
-                else:
-                    self.SystemState = system_state_line
-                logging.debug("System State: %s" % self.SystemState)
-        except subprocess.CalledProcessError as e:
-            logging.error("Failed to get system state: %s" % e)
-            self.SystemState = "unknown"
-        except Exception as e:
-            logging.error("Unexpected error getting system state: %s" % e)
-            self.SystemState = "unknown"
+        if getattr(self, "_system_info_pending", False):
+            return
+        self._system_info_pending = True
+        import threading
+        threading.Thread(target=self._do_poll_system_info, daemon=True, name="SystemInfoPoller").start()
 
-        # Check for throttling
+    def _do_poll_system_info(self):
         try:
-            output = subprocess.check_output(['vcgencmd', 'get_throttled'])
-            if output:
-                # Parse the output to extract the throttled value
-                # Output format is typically: throttled=0x0
-                throttled_line = output.decode().strip()
-                if '=' in throttled_line:
-                    throttled_value = throttled_line.split('=', 1)[1]
-                    self.throttled = throttled_value
-                else:
-                    self.throttled = throttled_line
-                logging.debug("Throttled status: %s" % self.throttled)
-        except subprocess.CalledProcessError as e:
-            logging.error("Failed to get throttled status: %s" % e)
-            self.throttled = "unknown"
-        except Exception as e:
-            logging.error("Unexpected error getting throttled status: %s" % e)
-            self.throttled = "unknown"
+            # Get the system state from the systemd service
+            try:
+                output = subprocess.check_output(['systemctl', 'show', '-p', 'SystemState'])
+                if output:
+                    # Parse the output to extract the SystemState value
+                    # Output format is typically: SystemState=running
+                    system_state_line = output.decode().strip()
+                    if '=' in system_state_line:
+                        self.SystemState = system_state_line.split('=', 1)[1]
+                    else:
+                        self.SystemState = system_state_line
+                    logging.debug("System State: %s" % self.SystemState)
+            except subprocess.CalledProcessError as e:
+                logging.error("Failed to get system state: %s" % e)
+                self.SystemState = "unknown"
+            except Exception as e:
+                logging.error("Unexpected error getting system state: %s" % e)
+                self.SystemState = "unknown"
 
-        # Check temperature
-        try:
-            output = subprocess.check_output(['vcgencmd', 'measure_temp'])
-            if output:
-                # Parse the output to extract the temperature value
-                # Output format is typically: temp=45.2'C
-                temp_line = output.decode().strip()
-                if '=' in temp_line:
-                    temp_value = temp_line.split('=', 1)[1]
-                    self.temperature = temp_value
-                else:
-                    self.temperature = temp_line
-                logging.debug("Temperature: %s" % self.temperature)
-        except subprocess.CalledProcessError as e:
-            logging.error("Failed to get temperature: %s" % e)
-            self.temperature = "unknown"
-        except Exception as e:
-            logging.error("Unexpected error getting temperature: %s" % e)
-            self.temperature = "unknown"
+            # Check for throttling
+            try:
+                output = subprocess.check_output(['vcgencmd', 'get_throttled'])
+                if output:
+                    # Parse the output to extract the throttled value
+                    # Output format is typically: throttled=0x0
+                    throttled_line = output.decode().strip()
+                    if '=' in throttled_line:
+                        throttled_value = throttled_line.split('=', 1)[1]
+                        self.throttled = throttled_value
+                    else:
+                        self.throttled = throttled_line
+                    logging.debug("Throttled status: %s" % self.throttled)
+            except subprocess.CalledProcessError as e:
+                logging.error("Failed to get throttled status: %s" % e)
+                self.throttled = "unknown"
+            except Exception as e:
+                logging.error("Unexpected error getting throttled status: %s" % e)
+                self.throttled = "unknown"
+
+            # Check temperature via sysfs first (fast), fallback to vcgencmd
+            temp_file = "/sys/class/thermal/thermal_zone0/temp"
+            if os.path.exists(temp_file):
+                try:
+                    with open(temp_file, "r") as f:
+                        temp_val = float(f.read().strip()) / 1000.0
+                        self.temperature = f"{temp_val:.1f}'C"
+                    return
+                except Exception:
+                    pass
+
+            try:
+                output = subprocess.check_output(['vcgencmd', 'measure_temp'])
+                if output:
+                    # Parse the output to extract the temperature value
+                    # Output format is typically: temp=45.2'C
+                    temp_line = output.decode().strip()
+                    if '=' in temp_line:
+                        temp_value = temp_line.split('=', 1)[1]
+                        self.temperature = temp_value
+                    else:
+                        self.temperature = temp_line
+                    logging.debug("Temperature: %s" % self.temperature)
+            except subprocess.CalledProcessError as e:
+                logging.error("Failed to get temperature: %s" % e)
+                self.temperature = "unknown"
+            except Exception as e:
+                logging.error("Unexpected error getting temperature: %s" % e)
+                self.temperature = "unknown"
+        finally:
+            self._system_info_pending = False
 
     def poll_lcd_updates(self):
         if self._lcd is not None:

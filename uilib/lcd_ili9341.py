@@ -20,6 +20,7 @@ from functools import cached_property
 import logging
 import threading
 import os
+import queue
 
 # Written by early-boot splash integration before pi-stomp starts; lives in tmpfs
 # (/run) for the current boot only. pi-stomp reads it but never creates it.
@@ -48,6 +49,12 @@ class LcdIli9341(LcdBase):
         self.height = self.disp.width
         self.flip = flip
 
+        # Initialize queue and writer thread for asynchronous display updates
+        self._queue = queue.Queue()
+        self._running = True
+        self._thread = threading.Thread(target=self._write_loop, daemon=True, name="lcd-writer")
+        self._thread.start()
+
     @cached_property
     def has_system_splash(self):
         """True when early boot left INIT_STAMP (OS splash already shown this boot)."""
@@ -65,16 +72,6 @@ class LcdIli9341(LcdBase):
         self.lock.release()
 
     def update(self, image, box = None):
-        if self.lock.locked():
-            logging.debug("LCD update was locked by another thread")
-        self.lock.acquire()
-        # LCD coordinates
-        #
-        # portrait mode, connector = bottom
-        #
-        # on pi-stomp, X=0 is "bottom" (away from jacks)
-        #              Y=0 is "left" (out jack side)
-        #
         img_width, img_height = image.size
         if box is None:
             box = Box(0, 0, img_width, img_height)
@@ -85,14 +82,41 @@ class LcdIli9341(LcdBase):
             x2 = self.width
         if y2 > self.height:
             y2 = self.height
-        if x1 != 0 or y1 != 0 or x2 != img_width or y2 != img_width:
-            image = image.crop((x1, y1, x2, y2))
-            if self.flip:
-                x = self.height - y2
-                y = x1
-            else:
-                x = y1
-                y = self.width - x2
-        self.disp.image(image, 270 if self.flip else 90, x, y)
-        self.lock.release()
+
+        # Crop the portion of the image to send and force pixel copy immediately
+        sub_image = image.crop((x1, y1, x2, y2))
+        sub_image.load()
+
+        if self.flip:
+            x = self.height - y2
+            y = x1
+        else:
+            x = y1
+            y = self.width - x2
+
+        self._queue.put((sub_image, x, y))
+
+    def _write_loop(self):
+        while self._running:
+            try:
+                task = self._queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if task is None:
+                break
+            sub_image, x, y = task
+            self.lock.acquire()
+            try:
+                self.disp.image(sub_image, 270 if self.flip else 90, x, y)
+            except Exception as e:
+                logging.error(f"LCD SPI background write failed: {e}")
+            finally:
+                self.lock.release()
+            self._queue.task_done()
+
+    def cleanup(self):
+        self._running = False
+        self._queue.put(None)
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)
 

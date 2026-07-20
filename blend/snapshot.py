@@ -18,6 +18,7 @@
 """Snapshot file operations for blend mode."""
 
 import json
+import os
 import logging
 import requests as req
 from pathlib import Path
@@ -140,10 +141,15 @@ class SnapshotManager:
             modified = True
 
         if modified:
-            with open(snapshots_file, "w") as f:
-                json.dump(snapshots_data, f, indent=4)
-            SnapshotManager._notify_mod_ui(root_uri)
-            logging.info(f"Synced {len(indices)} blend snapshots")
+            temp_file = snapshots_file.with_name(snapshots_file.name + ".tmp")
+            try:
+                with open(temp_file, "w") as f:
+                    json.dump(snapshots_data, f, indent=4)
+                os.replace(temp_file, snapshots_file)
+                SnapshotManager._notify_mod_ui(root_uri)
+                logging.info(f"Synced {len(indices)} blend snapshots")
+            except (IOError, OSError) as e:
+                logging.error(f"Failed to write snapshots file {snapshots_file}: {e}")
 
         return indices
 
