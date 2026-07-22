@@ -287,6 +287,10 @@ class Lcd:
             self.pstack.refresh()
         # self.main_panel.refresh()
 
+    def is_main_panel_active(self) -> bool:
+        """Return True if the main pedalboard panel is currently active on top of the LCD panel stack."""
+        return self.pstack.current in (self.main_panel, self.footswitch_panel)
+
     def handle(self, event: ControllerEvent) -> bool:
         # Ask the top input-accepting panel first. It returns True to stop the
         # event from reaching the normal handler cascade.

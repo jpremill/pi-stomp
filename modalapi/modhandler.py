@@ -819,8 +819,8 @@ class Modhandler(Handler):
                 for plugin in self.current.pedalboard.plugins:
                     if plugin.instance_id == msg.instance:
                         logging.debug(f"WebSocket: Plugin {msg.instance} bypass -> {msg.bypassed}")
-                        plugin.set_bypass(msg.bypassed)
-                        break
+                        return plugin.set_bypass(msg.bypassed)
+            return False
 
         elif isinstance(msg, RemovePluginMessage):
             if self._is_pedalboard_loading:
@@ -846,6 +846,7 @@ class Modhandler(Handler):
                     self.lcd.draw_main_panel()
                 else:
                     logging.debug(f"WebSocket: remove {msg.instance} — not found in model")
+            return False
 
         elif isinstance(msg, ConnectMessage):
             if self._is_pedalboard_loading:
@@ -854,6 +855,7 @@ class Modhandler(Handler):
                 self.current.pedalboard.add_connection(msg.port_from, msg.port_to)
                 logging.info(f"WebSocket: Connected {msg.port_from} -> {msg.port_to}")
                 self.lcd.draw_main_panel()
+            return False
 
         elif isinstance(msg, DisconnectMessage):
             if self._is_pedalboard_loading:
@@ -862,6 +864,7 @@ class Modhandler(Handler):
                 self.current.pedalboard.remove_connection(msg.port_from, msg.port_to)
                 logging.info(f"WebSocket: Disconnected {msg.port_from} -> {msg.port_to}")
                 self.lcd.draw_main_panel()
+            return False
 
         elif isinstance(msg, TransportMessage):
             new_sync = SyncMode.parse(msg.sync_mode)
@@ -879,26 +882,27 @@ class Modhandler(Handler):
                     self.lcd.update_sync_mode(new_sync)
                 if rolling_changed:
                     self.lcd.update_audio_midi_tile()
+            return False
 
         elif isinstance(msg, ParamSetMessage):
             # Mirror mod-ui's live value: refresh the cache (so a later edit opens
-            # at the current value) and sync any bound control. The connect-dump
-            # delivers the real mod-ui state here — :bypass aside, nothing else
-            # repaints a non-bypass footswitch. An open panel learns of the
-            # change through its parameter subscription; no message arm needs to
-            # know panels exist.
+            # at the current value) and sync any bound control. Return True if the
+            # value actually changed so poll_ws_messages can trigger a main panel repaint.
             if self._current is not None:
                 for plugin in self.current.pedalboard.plugins:
                     if plugin.instance_id == msg.instance:
-                        plugin.set_param_value(msg.symbol, msg.value)
-                        break
+                        return plugin.set_param_value(msg.symbol, msg.value)
+            return False
 
         elif isinstance(msg, MidiMapMessage):
             # MIDI learn in mod-ui assigned a hardware control to a parameter.
             self._apply_midi_binding(msg.instance, msg.symbol, msg.binding)
+            return False
 
         elif isinstance(msg, PatchSetMessage):
-            self._handle_patch_set(msg)
+            return self._handle_patch_set(msg)
+
+        return False
 
     @staticmethod
     def _apply_patch(plugin: Plugin, param_uri: str, value: str) -> bool:
@@ -910,7 +914,7 @@ class Modhandler(Handler):
         plugin.customization = replace(plugin.customization, extra_data=extra)
         return True
 
-    def _handle_patch_set(self, msg: PatchSetMessage) -> None:
+    def _handle_patch_set(self, msg: PatchSetMessage) -> bool:
         """A plugin's writable property changed. This is the only source of extra
         data for a freshly added plugin — it has no effect-N bundle on disk until
         the board is saved."""
@@ -918,13 +922,14 @@ class Modhandler(Handler):
         # before last.json reload sets current.
         self._pending_dump_patch[(msg.instance, msg.param_uri)] = msg.value
         if self._current is None:
-            return
+            return False
         plugin = next(
             (p for p in self.current.pedalboard.plugins if p.instance_id == msg.instance),
             None,
         )
-        if plugin is not None and self._apply_patch(plugin, msg.param_uri, msg.value):
-            self.lcd.draw_main_panel()
+        if plugin is not None:
+            return self._apply_patch(plugin, msg.param_uri, msg.value)
+        return False
 
     def _handle_dynamic_plugin_add(self, msg: AddPluginMessage) -> None:
         """Handle an `add` WS message for a plugin not yet in the pedalboard model."""
@@ -946,11 +951,21 @@ class Modhandler(Handler):
     def poll_ws_messages(self):
         """Drain inbound WS messages (fast ~10ms cadence). Main-thread only.
         Must not touch next_pedalboard_preset_index (owned by the file-watch path)."""
+        main_panel_dirty = False
         for msg in self.ws_bridge.get_received_messages():
             try:
-                self._handle_ws_message(parse_message(msg))
+                if self._handle_ws_message(parse_message(msg)):
+                    main_panel_dirty = True
             except Exception as e:
                 logging.error(f"Error handling WebSocket message '{msg}': {e}")
+
+        if (
+            main_panel_dirty
+            and not self._is_pedalboard_loading
+            and self._lcd is not None
+            and self.lcd.is_main_panel_active()
+        ):
+            self.lcd.draw_main_panel()
 
     def poll_modui_changes(self):
         """Poll for changes from MOD-UI: websockets and file watching"""

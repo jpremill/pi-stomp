@@ -95,7 +95,7 @@ class AudioMidiParamSource:
                 val = self._read(band.gain_sym, *_EQ_BAND_RANGE)
                 self.parameters[band.gain_sym] = _make_param(band.name, band.gain_sym, val, *_EQ_BAND_RANGE)
 
-    def set_param_value(self, symbol: Symbol, value: float) -> None:
+    def set_param_value(self, symbol: Symbol, value: float) -> bool:
         # Commit to the audiocard (the single hardware writer for these),
         # then mirror into the reactive Parameter so observers fire.
         self._audiocard.set_volume_parameter(str(symbol), value)
@@ -106,7 +106,10 @@ class AudioMidiParamSource:
                 self._hardware.recalibrateVU_gain(value)
         p = self.parameters.get(symbol)
         if p is not None:
+            changed = p.value != value
             p.value = value
+            return changed
+        return False
 
     def subscribe(self, cb: Callable[[Parameter], None]) -> Callable[[], None]:
         unsubs = [p.subscribe(cb) for p in self.parameters.values()]

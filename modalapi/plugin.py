@@ -132,24 +132,23 @@ class Plugin:
         param.value = new_value
         return new_value
 
-    def set_param_value(self, symbol: Symbol, value: float) -> None:
+    def set_param_value(self, symbol: Symbol, value: float) -> bool:
         """Cache a param's value from mod-ui and mirror it onto any bound
-        footswitch. The mirror is unconditional (outside the idempotent setter)
-        because a MIDI-originated echo arrives at the same value we already
-        wrote optimistically — the setter skips it, but the footswitch keycap
-        still needs to update. See plan: the mod-ui MIDI echo asymmetry."""
+        footswitch. Returns True if the parameter value actually changed."""
         param = self.parameters.get(symbol)
         if param is None:
-            return
+            return False
+        changed = param.value != value
         param.value = value
         for c in self.controllers:
             # Only stateful controllers hold a presentation copy to sync (a
             # footswitch keycap, a pot's reading). Encoders own no copy.
             if c.parameter is param and isinstance(c, StatefulController):
                 c.set_value(value)
+        return changed
 
-    def set_bypass(self, bypass: bool) -> None:
-        self.set_param_value(BYPASS_SYMBOL, 1.0 if bypass else 0.0)
+    def set_bypass(self, bypass: bool) -> bool:
+        return self.set_param_value(BYPASS_SYMBOL, 1.0 if bypass else 0.0)
 
     def subscribe(self, cb: Callable[[Parameter], None]) -> Callable[[], None]:
         """Fan *cb* out over every parameter. Returns a single unsubscriber that
