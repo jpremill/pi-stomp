@@ -85,6 +85,11 @@ def _send_key(window, key):
     window.process_events()
 
 
+def _send_keyup(window, key):
+    pygame.event.post(pygame.event.Event(pygame.KEYUP, key=key, mod=0))
+    window.process_events()
+
+
 # ---------------------------------------------------------------------------
 # Footswitches
 # ---------------------------------------------------------------------------
@@ -99,13 +104,32 @@ def _send_key(window, key):
         (pygame.K_4, 3),
     ],
 )
-def test_number_key_presses_corresponding_footswitch(key, index):
+def test_number_key_down_presses_corresponding_footswitch(key, index):
     window, hw = _make_window()
     _send_key(window, key)
-    hw.footswitches[index].press.assert_called_once_with()
+    hw.footswitches[index].press_down.assert_called_once_with()
     for i, fs in enumerate(hw.footswitches):
         if i != index:
-            fs.press.assert_not_called()
+            fs.press_down.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "key,index",
+    [
+        (pygame.K_1, 0),
+        (pygame.K_2, 1),
+        (pygame.K_3, 2),
+        (pygame.K_4, 3),
+    ],
+)
+def test_number_key_up_releases_corresponding_footswitch(key, index):
+    window, hw = _make_window()
+    _send_key(window, key)
+    _send_keyup(window, key)
+    hw.footswitches[index].press_up.assert_called_once_with()
+    for i, fs in enumerate(hw.footswitches):
+        if i != index:
+            fs.press_up.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

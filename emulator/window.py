@@ -43,6 +43,14 @@ _FONTS_DIR  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 _FONT_MONO      = os.path.join(_FONTS_DIR, "DejaVuSansMono.ttf")
 _FONT_MONO_BOLD = os.path.join(_FONTS_DIR, "DejaVuSansMono-Bold.ttf")
 
+# Top-row number keys map to footswitch slots; KP variants included for numpads.
+_FS_KEYS = {
+    pygame.K_1: 0, pygame.K_KP1: 0,
+    pygame.K_2: 1, pygame.K_KP2: 1,
+    pygame.K_3: 2, pygame.K_KP3: 2,
+    pygame.K_4: 3, pygame.K_KP4: 3,
+}
+
 
 class _FTFont:
     """Wraps pygame._freetype.Font to match the pygame.font.Font render API."""
@@ -229,6 +237,9 @@ class EmulatorWindow:
             if event.type == pygame.KEYDOWN:
                 self._handle_key(event.key, event.mod)
 
+            if event.type == pygame.KEYUP:
+                self._handle_keyup(event.key, event.mod)
+
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self._exp_slider_rect.collidepoint(event.pos):
                     self._exp_dragging = True
@@ -276,7 +287,7 @@ class EmulatorWindow:
         hints = ["← → nav  Enter=click  L=long"]
         num_fs = len(self.hw.footswitches)
         if num_fs:
-            hints.append("1-%d footswitches" % num_fs)
+            hints.append("1-%d fs  hold=long" % num_fs)
         tweak = getattr(self.hw, 'tweak_encoders', [])
         vol   = getattr(self.hw, 'volume_encoder', None)
         if len(tweak) >= 1:
@@ -335,15 +346,9 @@ class EmulatorWindow:
         elif key == pygame.K_l and nav:
             nav.press(switchstate.Value.LONGPRESSED)
 
-        # Footswitches
-        elif key in (pygame.K_1, pygame.K_KP1):
-            self._press_fs(0)
-        elif key in (pygame.K_2, pygame.K_KP2):
-            self._press_fs(1)
-        elif key in (pygame.K_3, pygame.K_KP3):
-            self._press_fs(2)
-        elif key in (pygame.K_4, pygame.K_KP4):
-            self._press_fs(3)
+        # Footswitches (hold to longpress; DOWN/UP build the held gesture)
+        elif key in _FS_KEYS:
+            self._fs_down(_FS_KEYS[key])
 
         # Tweak encoder 1
         elif key == pygame.K_q and len(tweak) >= 1:
@@ -373,9 +378,17 @@ class EmulatorWindow:
         elif key == pygame.K_DOWN:
             self._nudge_exp(-5)
 
-    def _press_fs(self, index):
+    def _handle_keyup(self, key, mod):
+        if key in _FS_KEYS:
+            self._fs_up(_FS_KEYS[key])
+
+    def _fs_down(self, index):
         if index < len(self.hw.footswitches):
-            self.hw.footswitches[index].press()
+            self.hw.footswitches[index].press_down()
+
+    def _fs_up(self, index):
+        if index < len(self.hw.footswitches):
+            self.hw.footswitches[index].press_up()
 
     def _nudge_exp(self, delta):
         if not self.hw.analog_controls:

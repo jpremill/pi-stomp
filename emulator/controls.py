@@ -86,7 +86,15 @@ class MockEncoderMidi(EncoderController):
 
 
 class MockFootswitch(footswitch.Footswitch):
-    """Footswitch with no GPIO/ADC.  Driven externally via press()."""
+    """Footswitch with no GPIO/ADC.  Driven externally: the window routes key
+    down/up to press_down()/press_up(); poll() drives the PRESSED→LONGPRESSED
+    transition while held, mirroring the hardware detectors so longpress
+    actions and chords route through the real _on_switch() → sink dispatch."""
+
+    LONG_PRESS_TIME = 0.5  # matches AnalogSwitch / GpioSwitch
+
+    press_state: switchstate.Value
+    _press_time: float | None
 
     @classmethod
     def check_longpress_events(cls):
@@ -97,11 +105,40 @@ class MockFootswitch(footswitch.Footswitch):
         super().__init__(id, None, None, midi_CC, midi_channel, refresh_callback)
         self.type = None
         self.cfg = {}
+        self.press_state = switchstate.Value.RELEASED
+        self._press_time = None  # monotonic() at press-down
 
     def poll(self):
-        pass
+        # PRESSED → LONGPRESSED while held, mirroring AnalogSwitch.refresh /
+        # GpioSwitch.poll so a held mock matures into a real LONGPRESS event.
+        if self.press_state is switchstate.Value.PRESSED and self._press_time is not None:
+            if time.monotonic() - self._press_time >= self.LONG_PRESS_TIME:
+                self.press_state = switchstate.Value.LONGPRESSED
+                self._on_switch(switchstate.Value.LONGPRESSED, self._press_time)
+
+    def press_down(self, timestamp=None):
+        if self.press_state is switchstate.Value.RELEASED:
+            self.press_state = switchstate.Value.PRESSED
+            self._press_time = timestamp if timestamp is not None else time.monotonic()
+        self.refresh_callback(footswitch=self)
+
+    def press_up(self):
+        # LONGPRESSED release clears silently (matches AnalogSwitch); a short
+        # PRESSED release dispatches the RELEASED → PRESS switch event.
+        if self.press_state is switchstate.Value.LONGPRESSED:
+            self.press_state = switchstate.Value.RELEASED
+            self._press_time = None
+        elif self.press_state is switchstate.Value.PRESSED:
+            self.press_state = switchstate.Value.RELEASED
+            self._on_switch(switchstate.Value.RELEASED, self._press_time or 0.0)
+            self._press_time = None
+        else:
+            self._press_time = None
+        self.refresh_callback(footswitch=self)
 
     def press(self):
+        # Backward-compat for the window button + legacy tests: a click is a
+        # visual toggle, kept direct so it works whether or not a sink exists.
         self.toggled = not self.toggled
         self.refresh_callback(footswitch=self)
 
