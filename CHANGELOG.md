@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Global EQ now accounts for the current sample rate
 
 ### Fixed
-- Fix parameter rollback across all sinks (WebSocket param_set, transport BPM, MIDI CC, ALSA) by reconciling confirmed state upon successful emission
+- Fix parameter snap-back / rollback bug caused by `_is_pedalboard_loading` remaining stuck `True` after connect dump / snapshot loading, and reconcile confirmed state across all local sinks (WebSocket param_set, transport BPM, MIDI CC, ALSA)
 - WiFi: fixed WPA3 support
 - Fix footswitch ↔ plugin param binding updates in menus
 - Fix inverted Q factor in x42 EQ panel

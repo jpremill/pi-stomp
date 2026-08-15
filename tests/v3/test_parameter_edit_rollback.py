@@ -4,6 +4,7 @@ import pytest
 from common.parameter import Parameter, PortInfo, Symbol
 from modalapi.pedalboard import BPM_SYMBOL
 from modalapi.plugin import Plugin
+from modalapi.ws_protocol import LoadingEndMessage, LoadingStartMessage
 from tests.types import SystemFixture
 from uilib.parameterdialog import Parameterdialog
 
@@ -156,3 +157,32 @@ def test_audio_parameter_confirms_on_alsa_emission(v3_system: SystemFixture):
 
     assert param.value == -6.0
     assert param._confirmed == -6.0
+
+
+def test_loading_end_resets_is_pedalboard_loading_allowing_param_edits(v3_system: SystemFixture, make_plugin):
+    """When MOD-UI sends loading_start followed by loading_end (e.g. WebSocket connect dump or snapshot load),
+    _is_pedalboard_loading must reset to False so subsequent parameter edits succeed and do not roll back."""
+    handler = v3_system.handler
+    plugin = _install(v3_system, make_plugin)
+    param = plugin.parameters[Symbol("gain")]
+    dialog = handler.lcd.draw_parameter_dialog(param)
+    assert isinstance(dialog, Parameterdialog)
+
+    # MOD-UI sends connect dump / snapshot loading
+    handler._handle_ws_message(LoadingStartMessage(is_default=False))
+    assert handler._is_pedalboard_loading is True
+
+    # Loading ends
+    handler._handle_ws_message(LoadingEndMessage(snapshot_id=1))
+    assert handler._is_pedalboard_loading is False
+
+    # Now turn NAV encoder: edit MUST succeed and commit over WebSocket
+    dialog.input_step(1, 1)
+    new_val = param.value
+    assert new_val > 0.5
+    assert param._confirmed == pytest.approx(new_val, abs=1e-4)
+
+    # WebSocket bridge must have sent the param_set message
+    assert len(v3_system.ws_bridge.sent) > 0
+    assert v3_system.ws_bridge.sent[-1].startswith("param_set /graph/fuzz/gain")
+

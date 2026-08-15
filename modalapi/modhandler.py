@@ -766,6 +766,7 @@ class Modhandler(Handler):
         elif isinstance(msg, LoadingEndMessage):
             # Sometimes mod-ui sends us -1 for preset index, but shows 0 anyway ("Default")
             self.next_pedalboard_preset_index = max(0, msg.snapshot_id)
+            self._is_pedalboard_loading = False
 
         elif isinstance(msg, PedalSnapshotMessage):
             if self.next_pedalboard_preset_index is not None:
@@ -995,7 +996,10 @@ class Modhandler(Handler):
                 self.current.preset_index = self.next_pedalboard_preset_index
                 self._handle_blend_mode_snapshot_change(self.next_pedalboard_preset_index)
                 self.next_pedalboard_preset_index = None
+                self._is_pedalboard_loading = False
                 self.lcd.draw_title()
+            else:
+                self._is_pedalboard_loading = False
 
         # Look for a change in banks file
         if self.banks_monitor.check_for_change():
