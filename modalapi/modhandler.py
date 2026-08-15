@@ -1232,7 +1232,10 @@ class Modhandler(Handler):
 
     def _publish_bpm(self, param: Parameter) -> bool:
         """Publish the BPM to the transport."""
-        return self.set_mod_tap_tempo(param.value)
+        ok = self.set_mod_tap_tempo(param.value)
+        if ok:
+            param.reconcile(param.value)
+        return ok
 
     def _publish_audio(self, param: Parameter) -> bool:
         """ A local ALSA write. No remote echo, so the send always lands."""
@@ -1249,7 +1252,10 @@ class Modhandler(Handler):
     def _publish_plugin_param(self, param: Parameter) -> bool:
         if self._is_pedalboard_loading or self.ws_bridge is None or param.instance_id is None:
             return False
-        return self.ws_bridge.send_parameter(param.instance_id, param.symbol, param.value)
+        ok = self.ws_bridge.send_parameter(param.instance_id, param.symbol, param.value)
+        if ok:
+            param.reconcile(param.value)
+        return ok
 
     def _redraw_after_binding(self, controller: Controller | None, is_footswitch: bool) -> None:
         if is_footswitch and controller is not None:

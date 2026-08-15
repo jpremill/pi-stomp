@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from common.parameter import Parameter, PortInfo, Symbol
+from modalapi.pedalboard import BPM_SYMBOL
 from modalapi.plugin import Plugin
 from tests.types import SystemFixture
 from uilib.parameterdialog import Parameterdialog
@@ -42,6 +43,9 @@ def test_parameterdialog_nav_turn_updates_value_and_sends_ws(v3_system: SystemFi
     assert len(v3_system.ws_bridge.sent) > 0
     msg = v3_system.ws_bridge.sent[-1]
     assert msg.startswith("param_set /graph/fuzz/gain")
+
+    # The confirmed value should be updated because MOD-UI suppresses WebSocket echoes to sender
+    assert param._confirmed == pytest.approx(new_val, abs=1e-4)
 
 
 def test_parameterdialog_rollback_when_loading_is_active(v3_system: SystemFixture, make_plugin):
@@ -90,3 +94,27 @@ def test_midi_cc_bound_param_confirms_on_cc_emit(v3_system: SystemFixture, make_
 
     # The confirmed value should be updated because CC emit has no remote echo
     assert param._confirmed == pytest.approx(new_val, abs=1e-4)
+
+
+def test_bpm_param_confirms_on_successful_emission(v3_system: SystemFixture):
+    """Transport BPM publishes via set_mod_tap_tempo. Because MOD-UI emits no echo
+    to the sender, a successful send must confirm the parameter."""
+    handler = v3_system.handler
+    assert handler.current is not None
+    time_info = {
+        "available": 0x7,
+        "bpb": 4.0,
+        "bpbCC": {"channel": -1, "control": 0},
+        "bpm": 120.0,
+        "bpmCC": {"channel": -1, "control": 0},
+        "rolling": False,
+        "rollingCC": {"channel": -1, "control": 0},
+    }
+    handler.current.pedalboard.transport_plugin = handler.current.pedalboard._build_transport_plugin(time_info)
+    bpm_param = handler.current.pedalboard.transport_plugin.parameters[BPM_SYMBOL]
+    assert bpm_param._confirmed == 120.0
+
+    handler.parameter_value_commit(bpm_param, 135.0)
+
+    assert bpm_param.value == 135.0
+    assert bpm_param._confirmed == 135.0
