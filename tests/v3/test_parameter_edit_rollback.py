@@ -118,3 +118,41 @@ def test_bpm_param_confirms_on_successful_emission(v3_system: SystemFixture):
 
     assert bpm_param.value == 135.0
     assert bpm_param._confirmed == 135.0
+
+
+def test_parameterdialog_rollback_reverts_to_last_successful_edit(v3_system: SystemFixture, make_plugin):
+    """When an edit succeeds, confirmed state advances. If a subsequent edit fails,
+    it rolls back to the last confirmed edit, NOT the initial boot/load value."""
+    plugin = _install(v3_system, make_plugin)
+    param = plugin.parameters[Symbol("gain")]
+    dialog = v3_system.handler.lcd.draw_parameter_dialog(param)
+    assert isinstance(dialog, Parameterdialog)
+    assert param.value == 0.5
+    assert param._confirmed == 0.5
+
+    # Step 1: Successful edit
+    dialog.input_step(1, 1)
+    step1_val = param.value
+    assert step1_val > 0.5
+    assert param._confirmed == pytest.approx(step1_val, abs=1e-4)
+
+    # Step 2: Failed edit (e.g. transient backpressure or loading)
+    v3_system.handler._is_pedalboard_loading = True
+    dialog.input_step(1, 1)
+
+    # Value rolls back to step 1's confirmed value, not 0.5
+    assert param.value == pytest.approx(step1_val, abs=1e-4)
+    assert param._confirmed == pytest.approx(step1_val, abs=1e-4)
+
+
+def test_audio_parameter_confirms_on_alsa_emission(v3_system: SystemFixture):
+    """Audio card parameters (ALSA) write locally with no remote echo and must confirm on send."""
+    handler = v3_system.handler
+    info: PortInfo = {"shortName": "Master Vol", "symbol": "master_volume", "ranges": {"minimum": -60.0, "maximum": 12.0}}
+    param = Parameter(info, 0.0, None, None)  # instance_id=None routes to _publish_audio
+    assert param._confirmed == 0.0
+
+    handler.parameter_value_commit(param, -6.0)
+
+    assert param.value == -6.0
+    assert param._confirmed == -6.0
